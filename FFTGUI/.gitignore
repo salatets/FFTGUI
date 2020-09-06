@@ -2,6 +2,7 @@ bin/
 obj/
 *.pdb
 *.ipdb
-*.csproj.user
+*.user
 *.iobj
 *.ilk
+*.dll
