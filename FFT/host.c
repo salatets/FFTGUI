@@ -236,24 +236,78 @@ cl_uint getVersion(const char* versionName)
     return 0;
 }
 
+void free_platforms(struct Platform* platforms, cl_uint num_platforms)
+{
+    for (cl_uint i = 0; i < num_platforms; ++i)
+    {
+        free(platforms[i].name);
+
+        for (cl_uint j = 0; j < platforms[i].num_devices; ++j)
+        {
+            free(platforms[i].devices[j].name);
+            clReleaseDevice(platforms[i].devices[j].id);
+        }
+
+        free(platforms[i].devices);
+    }
+    free(platforms);
+}
+
+void clean_get_platforms(struct Platform* platforms, cl_uint num_platforms, cl_platform_id* platforms_id, char* versionName, cl_device_id* devices_id)
+{
+    for (cl_uint i = 0; i < num_platforms; ++i)
+    {
+        free(platforms[i].name);
+        platforms[i].name = NULL;
+
+        for (cl_uint j = 0; j < platforms[i].num_devices; ++j)
+        {
+            free(platforms[i].devices[j].name);
+            platforms[i].devices[j].name = NULL;
+            clReleaseDevice(platforms[i].devices[j].id);
+        }
+
+        free(platforms[i].devices);
+        platforms[i].devices = NULL;
+    }
+
+    free(devices_id);
+    free(platforms_id);
+    free(versionName);
+}
+
+// if one allocate is failed then platforms is clean up
 cl_int get_platforms(struct Platform* platforms, cl_uint num_platforms)
 {
     if (num_platforms == 0)
         return 1;
 
-    cl_platform_id* platforms_id;
-    cl_device_id* devices_id;
+    // init all platform referenses to NULL
+    for (cl_uint i = 0; i < num_platforms; i++) {
+        platforms[i].name = NULL;
+        platforms[i].devices = NULL;
+    }
+
+    cl_platform_id* platforms_id = NULL;
+    cl_device_id* devices_id = NULL;
 
     size_t stringLength;
-    char* versionName;
+    char* versionName = NULL;
     cl_int err;
 
 
     platforms_id = (cl_platform_id*)malloc(num_platforms * sizeof(cl_platform_id));
+    if (platforms_id == NULL) {
+        printf("Error: No Enougth memory\n");
+        clean_get_platforms(platforms, num_platforms, NULL, NULL, NULL);
+        return 1;
+    }
+
     err = clGetPlatformIDs(num_platforms, platforms_id, NULL);
     if (CL_SUCCESS != err)
     {
         printf("Error: clGetplatform_ids() to get platforms returned %s.\n", TranslateOpenCLError(err));
+        clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
         return 1;
     }
 
@@ -264,14 +318,22 @@ cl_int get_platforms(struct Platform* platforms, cl_uint num_platforms)
         if (CL_SUCCESS != err)
         {
             printf("Error: clGetPlatformInfo() to get CL_PLATFORM_NAME length returned '%s'.\n", TranslateOpenCLError(err));
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
             return 1;
         }
 
         platforms[i].name = (cl_uchar*)malloc(stringLength * sizeof(cl_uchar));
+        if (platforms[i].name == NULL) {
+            printf("Error: No Enougth memory\n");
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
+            return 1;
+        }
+
         err = clGetPlatformInfo(platforms_id[i], CL_PLATFORM_NAME, stringLength, platforms[i].name, NULL);
         if (CL_SUCCESS != err)
         {
             printf("Error: clGetPlatformInfo() to get CL_PLATFORM_NAME '%s'.\n", TranslateOpenCLError(err));
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
             return 1;
         }
 
@@ -280,13 +342,22 @@ cl_int get_platforms(struct Platform* platforms, cl_uint num_platforms)
         if (CL_SUCCESS != err)
         {
             printf("Error: clGetPlatformInfo() to get CL_PLATFORM_VERSION length returned '%s'.\n", TranslateOpenCLError(err));
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
             return 1;
         }
+
         versionName = (char*)malloc(stringLength * sizeof(char));
+        if (versionName == NULL) {
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
+            printf("Error: No Enougth memory\n");
+            return 1;
+        }
+
         err = clGetPlatformInfo(platforms_id[i], CL_PLATFORM_VERSION, stringLength, versionName, NULL);
         if (CL_SUCCESS != err)
         {
             printf("Error: clGetPlatformInfo() to get CL_PLATFORM_VERSION '%s'.\n", TranslateOpenCLError(err));
+            clean_get_platforms(platforms, num_platforms, platforms_id, versionName, NULL);
             return 1;
         }
         platforms[i].version = getVersion(versionName);
@@ -297,15 +368,34 @@ cl_int get_platforms(struct Platform* platforms, cl_uint num_platforms)
         if (CL_SUCCESS != err)
         {
             printf("clGetDeviceIDs() to get CL_DEVICE_TYPE_ALL length %s.\n", TranslateOpenCLError(err));
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
             return 1;
         }
+
+        if (platforms[i].num_devices == 0) {
+            platforms[i].devices == NULL;
+            continue;
+        }
+
         platforms[i].devices = (struct Device*)malloc(platforms[i].num_devices * sizeof(struct Device));
+        if (platforms[i].devices == NULL) {
+            printf("Error: No Enougth memory\n");
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
+            return 1;
+        }
 
         devices_id = (cl_device_id*)malloc(platforms[i].num_devices * sizeof(cl_device_id));
+        if (devices_id == NULL) {
+            printf("Error: No Enougth memory\n");
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
+            return 1;
+        }
+
         err = clGetDeviceIDs(platforms_id[i], CL_DEVICE_TYPE_ALL, platforms[i].num_devices, devices_id, NULL);
         if (CL_SUCCESS != err)
         {
             printf("clGetDeviceIDs() to get CL_DEVICE_TYPE_ALL %s.\n", TranslateOpenCLError(err));
+            clean_get_platforms(platforms, num_platforms, platforms_id, NULL, devices_id);
             return 1;
         }
 
@@ -318,14 +408,22 @@ cl_int get_platforms(struct Platform* platforms, cl_uint num_platforms)
             if (CL_SUCCESS != err)
             {
                 printf("Error: clGetPlatformInfo() to get CL_PLATFORM_NAME length returned '%s'.\n", TranslateOpenCLError(err));
+                clean_get_platforms(platforms, num_platforms, platforms_id, NULL, devices_id);
                 return 1;
             }
 
             platforms[i].devices[j].name = (cl_uchar*)malloc(stringLength * sizeof(cl_uchar));
+            if (platforms[i].devices[j].name == NULL) {
+                printf("Error: No Enougth memory\n");
+                clean_get_platforms(platforms, num_platforms, platforms_id, NULL, devices_id);
+                return 1;
+            }
+
             err = clGetDeviceInfo(devices_id[j], CL_DEVICE_NAME, stringLength, platforms[i].devices[j].name, NULL);
             if (CL_SUCCESS != err)
             {
                 printf("Error: clGetPlatformInfo() to get CL_PLATFORM_NAME returned '%s'.\n", TranslateOpenCLError(err));
+                clean_get_platforms(platforms, num_platforms, platforms_id, NULL, devices_id);
                 return 1;
             }
 
@@ -334,13 +432,20 @@ cl_int get_platforms(struct Platform* platforms, cl_uint num_platforms)
             if (CL_SUCCESS != err)
             {
                 printf("Error: clGetDeviceInfo() to get CL_PLATFORM_VERSION length returned '%s'.\n", TranslateOpenCLError(err));
+                clean_get_platforms(platforms, num_platforms, platforms_id, NULL, devices_id);
                 return 1;
             }
             versionName = (char*)malloc(stringLength * sizeof(char));
+            if (versionName == NULL) {
+                clean_get_platforms(platforms, num_platforms, platforms_id, NULL, NULL);
+                printf("Error: No Enougth memory\n");
+                return 1;
+            }
             err = clGetDeviceInfo(devices_id[j], CL_DEVICE_VERSION, stringLength, versionName, NULL);
             if (CL_SUCCESS != err)
             {
                 printf("Error: clGetDeviceInfo() to get CL_PLATFORM_NAME '%s'.\n", TranslateOpenCLError(err));
+                clean_get_platforms(platforms, num_platforms, platforms_id, versionName, devices_id);
                 return 1;
             }
             platforms[i].devices[j].version = getVersion(versionName);
@@ -403,6 +508,9 @@ cl_program build_program(cl_context ctx, cl_device_id dev) {
         clGetProgramBuildInfo(program, dev, CL_PROGRAM_BUILD_LOG,
             0, NULL, &log_size);
         program_log = (char*)malloc(log_size + 1);
+        if (program_log == NULL)
+            return NULL;
+
         program_log[log_size] = '\0';
         clGetProgramBuildInfo(program, dev, CL_PROGRAM_BUILD_LOG,
             log_size + 1, program_log, NULL);
@@ -416,11 +524,12 @@ cl_program build_program(cl_context ctx, cl_device_id dev) {
 
 cl_float* genRandom(cl_ulong size)
 {
+    if (size == 0)
+        return NULL;
+
     cl_float* data = (cl_float*)malloc(size * 2 * sizeof(cl_float));
     if (data == NULL)
     {
-        printf("No Enougth memory\n");
-        system("Pause");
     	return NULL;
     }
 
@@ -431,6 +540,17 @@ cl_float* genRandom(cl_ulong size)
     }
 
     return data;
+}
+
+void clean_up_CT(cl_context context, cl_program program, cl_kernel init_kernel, cl_kernel stage_kernel, cl_kernel scale_kernel, cl_mem data_buffer, cl_command_queue queue) {
+
+    clReleaseContext(context);
+    clReleaseProgram(program);
+    clReleaseKernel(init_kernel);
+    clReleaseKernel(stage_kernel);
+    clReleaseKernel(scale_kernel);
+    clReleaseMemObject(data_buffer);
+    clRetainCommandQueue(queue);
 }
 
 #define INIT_FUNC "fft_init"
@@ -463,8 +583,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
 	if(program == NULL)
 	{
         printf("Couldn't create a program\n");
-
-        clReleaseContext(context);
+        clean_up_CT(context, NULL, NULL, NULL, NULL, NULL, NULL);
         return 1;
 	}
 
@@ -473,8 +592,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't create the initial kernel: %d", err);
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
+        clean_up_CT(context, program, NULL, NULL, NULL, NULL, NULL);
         return 1;
     };
 
@@ -482,9 +600,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't create the stage kernel: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
+        clean_up_CT(context, program, init_kernel, NULL, NULL, NULL, NULL);
         return 1;
     };
 
@@ -492,10 +608,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't create the scale kernel: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
+        clean_up_CT(context, program, init_kernel, stage_kernel, NULL, NULL, NULL);
         return 1;
     }
 
@@ -506,11 +619,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't create a buffer: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, NULL, NULL);
         return 1;
     };
 
@@ -520,12 +629,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't find the maximum work-group size: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
-        clReleaseMemObject(data_buffer);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, NULL);
         return 1;
     };
     local_size = local_size / 4;
@@ -536,12 +640,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't determine the local memory size: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
-        clReleaseMemObject(data_buffer);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, NULL);
         return 1;
     };
 
@@ -559,12 +658,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't set a kernel argument");
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
-        clReleaseMemObject(data_buffer);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, NULL);
         return 1;
     };
 
@@ -580,12 +674,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't create a command queue: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
-        clReleaseMemObject(data_buffer);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, NULL);
         return 1;
     };
 	
@@ -595,13 +684,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't write tu buffer: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
-        clReleaseMemObject(data_buffer);
-        clRetainCommandQueue(queue);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
         return 1;
     }
 
@@ -618,13 +701,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't enqueue the initial kernel: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
-        clReleaseMemObject(data_buffer);
-        clRetainCommandQueue(queue);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
         return 1;
     }
 
@@ -637,13 +714,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
         if (err < 0) {
             printf("Couldn't set a kernel argument: %s\n", TranslateOpenCLError(err));
 
-            clReleaseContext(context);
-            clReleaseProgram(program);
-            clReleaseKernel(init_kernel);
-            clReleaseKernel(stage_kernel);
-            clReleaseKernel(scale_kernel);
-            clReleaseMemObject(data_buffer);
-            clRetainCommandQueue(queue);
+            clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
             return 1;
         };
         for (stage = 2; stage <= num_points / points_per_group; stage <<= 1) {
@@ -653,13 +724,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
             if (err < 0) {
                 printf("Couldn't enqueue the stage kernel: %s\n", TranslateOpenCLError(err));
 
-                clReleaseContext(context);
-                clReleaseProgram(program);
-                clReleaseKernel(init_kernel);
-                clReleaseKernel(stage_kernel);
-                clReleaseKernel(scale_kernel);
-                clReleaseMemObject(data_buffer);
-                clRetainCommandQueue(queue);
+                clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
                 return 1;
             }
         }
@@ -673,13 +738,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
         if (err < 0) {
             printf("Couldn't set a kernel argument: %s\n", TranslateOpenCLError(err));
 
-            clReleaseContext(context);
-            clReleaseProgram(program);
-            clReleaseKernel(init_kernel);
-            clReleaseKernel(stage_kernel);
-            clReleaseKernel(scale_kernel);
-            clReleaseMemObject(data_buffer);
-            clRetainCommandQueue(queue);
+            clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
             return 1;
         };
         err = clEnqueueNDRangeKernel(queue, scale_kernel, 1, NULL, &global_size,
@@ -687,13 +746,7 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
         if (err < 0) {
             printf("Couldn't enqueue the initial kernel: %s\n", TranslateOpenCLError(err));
 
-            clReleaseContext(context);
-            clReleaseProgram(program);
-            clReleaseKernel(init_kernel);
-            clReleaseKernel(stage_kernel);
-            clReleaseKernel(scale_kernel);
-            clReleaseMemObject(data_buffer);
-            clRetainCommandQueue(queue);
+            clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
             return 1;
         }
     }
@@ -705,43 +758,14 @@ cl_int Cooley_Tukey(cl_float* data, cl_ulong const num_points, cl_int const dire
     if (err < 0) {
         printf("Couldn't read the buffer: %s\n", TranslateOpenCLError(err));
 
-        clReleaseContext(context);
-        clReleaseProgram(program);
-        clReleaseKernel(init_kernel);
-        clReleaseKernel(stage_kernel);
-        clReleaseKernel(scale_kernel);
-        clReleaseMemObject(data_buffer);
-        clRetainCommandQueue(queue);
+        clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
         return 1;
     }
 
     /* Deallocate resources */
-    clReleaseContext(context);
-    clReleaseProgram(program);
-    clReleaseKernel(init_kernel);
-    clReleaseKernel(stage_kernel);
-    clReleaseKernel(scale_kernel);
-    clReleaseMemObject(data_buffer);
-    clRetainCommandQueue(queue);
+    clean_up_CT(context, program, init_kernel, stage_kernel, scale_kernel, data_buffer, queue);
 
     return 0;
-}
-
-void free_platforms(struct Platform* platforms, cl_uint num_platforms)
-{
-    for (cl_uint i = 0; i < num_platforms; ++i)
-    {
-        free(platforms[i].name);
-    	
-        for (cl_uint j = 0; j < platforms[i].num_devices; ++j)
-        {
-            free(platforms[i].devices[j].name);
-            clReleaseDevice(platforms[i].devices[j].id);
-		}
-    	
-        free(platforms[i].devices);
-	}
-    free(platforms);
 }
 
 #define NUM_POINTS 4096//16777216//33554432//67108864//134217728//////4294967296//1048576//262144//16384//8192 //4096 //16384 //262144 //4096
@@ -751,7 +775,15 @@ int main(int argc, char* argv[])
     cl_uint num_platforms = get_num_platforms();
     printf("Numbers of platforms: %d\n", num_platforms);
     struct Platform* platforms = (struct Platform*)malloc(num_platforms * sizeof(struct Platform));
-    get_platforms(platforms, num_platforms);
+
+    if (platforms == NULL)
+        return 1;
+
+    if (get_platforms(platforms, num_platforms)) {
+        printf("No found CL platforms\n");
+        free(platforms);
+        return 1;
+    }
     PrintPlatforms(platforms, num_platforms);
 
 
@@ -761,11 +793,15 @@ int main(int argc, char* argv[])
         for (cl_uint j = 0; j < platforms[i].num_devices; ++j)
         {
             cl_float* data = genRandom(NUM_POINTS);
+            if (data == NULL) {
+                printf("Error: No Enougth memory\n");
+                continue;
+            }
         	
-            if (Cooley_Tukey(data, NUM_POINTS, 1, platforms[i].devices[j]) == 0)
-                printf("Succes\n");
-            else
+            if (Cooley_Tukey(data, NUM_POINTS, 1, platforms[i].devices[j]))
                 printf("Fail\n");
+            else
+                printf("Succes\n");
 
 			free(data);
         }
